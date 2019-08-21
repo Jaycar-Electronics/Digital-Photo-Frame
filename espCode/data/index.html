@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<meta charset='UTF-8'>
+<html>
+
+<head>
+    <link type="text/css" rel="stylesheet" href="https://unpkg.com/bootstrap/dist/css/bootstrap.min.css" />
+    <link type="text/css" rel="stylesheet" href="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue.css" />
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+    <script src="https://unpkg.com/babel-polyfill@latest/dist/polyfill.min.js"></script>
+    <script src="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue.js"></script>
+    <script>
+        if (!Array.prototype.last) {
+            Array.prototype.last = function () {
+                return this[this.length - 1];
+            };
+        };
+
+        axios.defaults.headers.post['Content-Type'] = 'application/x-www-form-urlencoded';
+
+
+        function serialise(obj) {
+            var str = [];
+            for (var p in obj)
+                if (obj.hasOwnProperty(p)) {
+                    str.push(encodeURIComponent(p) + "=" + encodeURIComponent(obj[p]));
+                }
+            return str.join("&");
+        }
+
+
+    </script>
+</head>
+
+<body>
+
+    <div id='app'>
+
+        <b-card>
+            <h3> Digital Photo Frame </h3>
+            <div class='card-body'>
+                <p>
+                    Put a list of image urls below to check the structure of the URLS. Once you have checked all of the
+                    URLS, press the 'Confirm' button to set it into the ESP flash memory.
+                </p>
+                <b-form-textarea id='textarea' v-model='input' @input='checkInput' placeholder='List of image urls...'
+                    rows="3" max-rows="8">
+                </b-form-textarea>
+                <p>Notes:</p>
+                <ul>
+                    <li>You cannot use <strong>https</strong> - only http; but usually just deleting the final 's' will
+                        fix this.</li>
+                    <li>This code will not work with png images; only <strong>.jpg</strong> or <strong>.jpeg</strong>
+                        files. </li>
+                </ul>
+            </div>
+            <b-btn @click='send' :variant='`${allowed? "success" : "danger"}`' :disabled='!allowed'> Confirm </b-btn>
+        </b-card>
+
+        <b-card>
+            <h4> Table Check: </h4>
+            <div class='card-body'>
+                <b-table striped hover :items='items' :fields='tablefields'>
+
+                </b-table>
+            </div>
+        </b-card>
+
+        <b-card>
+            <h4> Data params </h4>
+            <div class='card-body'>
+                <b-form-input v-model='output' placeholder='Final-value..' readonly> </b-form-input>
+                <b-form-input v-model='current' placeholder='Current-value..' readonly> </b-form-input>
+            </div>
+        </b-card>
+        <!-- end of app-->
+    </div>
+
+    <script type='text/javascript'>
+
+        /*
+        This is using bootstrap vue;
+
+        check out more information at : https://bootstrap-vue.js.org/docs/components/table
+
+        
+
+
+        */
+        var app = new Vue({
+            el: '#app',
+            data() {
+                return {
+                    message: 'Good Morning!',
+                    tablefields: ['filename', 'host', 'resource', 'type', 'error'],
+                    items: [],
+                    input: '',
+                    output: '',
+                    current: '',
+
+                    allowed: false
+                }
+            },
+            methods: {
+                send() {
+                    if (this.output.length == 0) {
+                        //show modal;
+                        this.$bvModal.msgBoxConfirm('Are you sure you want to submit nothing?')
+                            .then(value => {
+                                if (value) {
+                                    this.espSend();
+                                }
+                            });
+                    } else {
+                        this.espSend();
+                    }
+
+                },
+                espSend() {
+                    axios.post('/urllist', serialise({ data: this.output }))
+                    .then(function (response) {
+                        console.log("POST SUCCESS");
+                        console.log(response);
+                        this.$bvModal.msgBoxOk('sent to esp!');
+                    }).catch(r => {
+                        console.log("POST FAILURE");
+                        console.log(r.response);
+                    });
+
+                    //re-load the current
+                    this.espGet();
+
+                },
+
+                espGet() {
+                    var self = this;
+                    axios.get('/urllist').then(function (response) {
+                        console.log("GET SUCCESS");
+                        console.log(response);
+                        self.current = response.data;
+                    }).catch(r => {
+                        console.log("GET ERROR");
+                        console.log(r.response);
+                    });
+
+                },
+                checkInput() {
+
+                    this.items = [];
+
+                    //regex split
+                    var inputdata = this.input.split(/\r?\n/g);
+
+                    inputdata.forEach(e => {
+
+                        var d = Array.from(e.matchAll(/(https?):\/\/([a-z\.-]*)\/(.*)/gi))[0];
+                        console.log(d);
+                        if (d == undefined || d.length < 4) {
+                            return;
+                        }
+                        this.items.push({
+                            filename: d[3],
+                            host: d[2],
+                            resource: d[1],
+                            type: (d[3].includes('.')) ? d[3].split('.').last() : 'unknown'
+                        });
+                    });
+
+                    var outputData = [];
+                    this.allowed = true;
+
+                    this.items.forEach(e => {
+
+                        //check for https
+                        if (e['resource'] == 'https') {
+                            e['_rowVariant'] = 'danger';
+                            e['error'] = 'Cannot use https!';
+                            this.allowed = false;
+                        }
+                        else if (e['type'] == 'unknown') {
+                            e['_rowVariant'] = 'warning';
+                            e['error'] = 'unknown type, be cautious!';
+                            //it's allowed, just caution
+                        }
+                        else if (e['type'] != 'jpeg' && e['type'] != 'jpg') {
+                            e['_rowVariant'] = 'danger';
+                            e['error'] = 'Not JPG';
+                            this.allowed = false;
+                        }
+                    });
+
+                    if (this.allowed) {
+                        this.output = "";
+                        this.items.forEach(e => {
+
+                            var server = e['host'];
+                            var file = e['filename'];
+
+                            file = file.split('.');
+                            file[0] += 'm'
+                            file = file.join('.');
+
+                            var url = `http://${server}/${file},`;
+                            this.output += url;
+                        });
+                    }
+
+                }
+            },
+                //mounted is to mount the API space
+            mounted() {
+                this.espGet();
+
+            }
+        })
+    </script>
+</body>
+
+</html>

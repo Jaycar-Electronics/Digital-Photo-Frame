@@ -1,0 +1,329 @@
+
+//############################################
+// To program ESP8266:
+//DIPS ON:  [----567-]
+//DIPS OFF: [1234---8]
+// #define ESPCODE
+
+//############################################
+// To program UNO: (uncomment UNOCODE and comment out ESPCODE)
+//DIPS ON:  [--34----]
+//DIPS OFF: [12--5678]
+#define UNOCODE
+
+//############################################
+// To run functionality:
+//DIPS ON:  [12------]
+//DIPS OFF: [--345678]
+
+
+// the following must the same for both, so we can 
+// define the param, thus making them both be the 
+// same thing
+#define SERIAL_BAUD 115200
+
+#ifdef ESPCODE
+
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClient.h>
+
+#include <JPEGDecoder.h>
+
+#include <FS.h>
+
+
+
+
+
+#define IMG "http://i.imgur.com/Oo3sKMHm.jpg" //appended small m
+
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(SERIAL_BAUD);
+
+  WiFi.mode(WIFI_STA);
+  
+  WiFi.begin(wireless_name,wireless_pass);
+  Serial.print("% Connecting ");
+
+  while(WiFi.status() != WL_CONNECTED){
+    delay(100);
+    Serial.print(".");
+  }
+  Serial.println(" Connected!");
+
+  if(MDNS.begin("imgurPhotoFrame")){
+    Serial.println("% mdns started");
+  }
+
+  WiFiClient client;
+  HTTPClient http;
+
+  if (http.begin(IMG)) {  // HTTP
+
+    Serial.println("% Getting Image");
+
+    // start connection and send HTTP header
+    int httpCode = http.GET();
+
+    // httpCode will be negative on error
+    if (httpCode > 0) {
+      // HTTP header has been send and Server response header has been handled
+      Serial.printf("%% [HTTP] GET... code: %d\n", httpCode);
+
+      // file found at server
+
+      if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+        Serial.println();
+        Serial.print(">>>");
+
+        // Write Binary JPEG data to the filesystem
+        File display = SPIFFS.open("/currentDisplay","w");
+        int bytesSent = http.writeToStream(&display);
+
+        display.close();
+
+        Serial.println("<<<");
+      }
+    } else {
+    }
+    http.end();
+  } else {
+  }
+
+  //decode the file
+  boolean decoded = JpegDec.decodeFsFile("/currentDisplay");
+  if(decoded){
+
+   Serial.println(F("==============="));
+    Serial.println(F("JPEG image info"));
+    Serial.println(F("==============="));
+    Serial.print(F(  "Width      :")); Serial.println(JpegDec.width);
+    Serial.print(F(  "Height     :")); Serial.println(JpegDec.height);
+    Serial.print(F(  "Components :")); Serial.println(JpegDec.comps);
+    Serial.print(F(  "MCU / row  :")); Serial.println(JpegDec.MCUSPerRow);
+    Serial.print(F(  "MCU / col  :")); Serial.println(JpegDec.MCUSPerCol);
+    Serial.print(F(  "Scan type  :")); Serial.println(JpegDec.scanType);
+    Serial.print(F(  "MCU width  :")); Serial.println(JpegDec.MCUWidth);
+    Serial.print(F(  "MCU height :")); Serial.println(JpegDec.MCUHeight);
+    Serial.println(F("==============="));    Serial.println("")
+
+  } else {
+    Serial.println('% failed to decode file');
+  }
+
+
+  sendRender();
+}
+void send16(uint16_t data){
+  Serial.write((data>>8) & 0xFF);
+  Serial.write((short)(data & 0xFF));
+}
+void sendRender(int xpos, int ypos){
+  //get information from globals, send through serial port
+  // use atol on other side
+  // never use println
+  Serial.print(F(">>>")); //start tag
+  //JPG has MCU blocks, so we send each one like this:
+  send16(JpegDec.MCUWidth);
+  send16(JpegDec.MCUHeight);
+  send16(JpegDec.width); 
+  send16(JpegDec.height);
+  Serial.print(F("---"));
+
+  /**********************************************
+  // retrieve infomration about the image
+  uint16_t  *pImg; // done on arduino side
+  // Jpeg images are draw as a set of image block (tiles) called Minimum Coding Units (MCUs)
+  // Typically these MCUs are 16x16 pixel blocks
+  // Determine the width and height of the right and bottom edge image blocks
+  uint32_t min_w = minimum(mcu_w, max_x % mcu_w);
+  uint32_t min_h = minimum(mcu_h, max_y % mcu_h);
+  // save the current image block size
+  uint32_t win_w = mcu_w;
+  uint32_t win_h = mcu_h;
+
+  // record the current time so we can measure how long it takes to draw an image
+  uint32_t drawTime = millis();
+
+  // save the coordinate of the right and bottom edges to assist image cropping
+  // to the screen size
+  max_x += xpos;
+  max_y += ypos;
+    
+  ************************************************* */
+  while(JpegDec.read()){
+
+    //send the image block:
+    uint16_t block = *JpegDec.pImage;
+
+    uint32_t min_w = minimum(mcu_w, max_x % mcu_w);
+    uint32_t min_h = minimum(mcu_h, max_y % mcu_h);
+    // save the current image block size
+    uint32_t win_w = mcu_w;
+    uint32_t win_h = mcu_h;
+
+
+    Serial.print((block >> 8) & 0xFF);
+    Serial.print(block & 0xFF);
+    Serial.print("@");
+    Serial.print(Jpeg.MCUx * mcu_w + xpos);
+    Serial.print(Jpeg.MCUy * mcu_h + ypos);
+
+  }
+  /**********************************************
+   while(Serial.available()){
+     uint16_t block = Serial.read() << 8; // etc
+      as well as mcu_x and mcu_y; read from serial
+    // check if the image block size needs to be changed for the right and bottom edges
+    if (mcu_x + mcu_w <= max_x) win_w = mcu_w;
+    else win_w = min_w;
+    if (mcu_y + mcu_h <= max_y) win_h = mcu_h;
+    else win_h = min_h;
+    // calculate how many pixels must be drawn
+    uint16_t mcu_pixels = win_w * win_h;
+
+    // draw image MCU block only if it will fit on the screen
+    if ( ( mcu_x + win_w) <= tft.width() && ( mcu_y + win_h) <= tft.height())
+  {
+      // Now set a MCU bounding window on the TFT to push pixels into (x, y, x + width - 1, y + height - 1)
+      tft.setAddrWindow(mcu_x, mcu_y, mcu_x + win_w - 1, mcu_y + win_h - 1);
+
+      // Write all MCU pixels to the TFT window
+      //while (mcu_pixels--) tft.pushColor(*pImg++); // Send MCU buffer to TFT 16 bits at a time
+      tft.pushColors(pImg, mcu_pixels, 1);
+    }
+
+    // Stop drawing blocks if the bottom of the screen has been reached,
+    // the abort function will close the file
+    else if ( ( mcu_y + win_h) >= tft.height()) JpegDec.abort();
+
+  // calculate how long it took to draw the image
+  drawTime = millis() - drawTime;
+
+  // print the results to the serial port
+  Serial.print  ("Total render time was    : "); Serial.print(drawTime); Serial.println(" ms");
+  Serial.println("=====================================");
+   }
+   *********************************************** */
+}
+
+
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  delay(1);
+  //server.handleClient();
+  MDNS.update();
+}
+
+bool isPortraitOrientation(int h, int w){ return (h > w); }
+
+#endif
+
+#ifdef UNOCODE
+
+#include "Arduino.h"
+
+#include <SPI.h>
+
+bool imageFlag = false;
+bool headerFlag = false;
+bool error = false;
+
+uint16_t mcu_w;
+uint16_t mcu_h;
+uint16_t max_x;
+uint16_t max_y;
+uint16_t mcu_x;
+uint16_t mcu_y;
+
+inline uint16_t read16(){
+  byte upper = Serial.read();
+  byte lower = Serial.read();
+  return (upper << 8) | lower;
+}
+
+void SerialEvent(){
+  while(Serial.available()){
+    if(!imageFlag){
+      // this is just comment 
+      //read data;
+
+      headerFlag = true;
+      imageFlag = true;
+
+    } else {
+      // we're in the image tag, are we in the header?
+      if(!headerFlag){  //not in header, this is flag data.
+        //read 16 bytes of data;
+
+        uint16_t block = read16();
+
+        if(Serial.read() != '@'){ error = true;}
+        mcu_x = read16();
+        mcu_y = read16();
+
+        /* ------------------------------------------------------------
+                        SEND TO TFT
+        ------------------------------------------------------------- */ 
+
+        // check if the image block size needs to be changed for the right and bottom edges
+        win_w = (mcu_x + mcu_w <= max_x) ? mcu_w : min_w; 
+        win_h = (mcu_y + mcu_h <= max_y) ? mcu_h : min_h; 
+
+        // calculate how many pixels must be drawn
+        uint16_t mcu_pixels = win_w * win_h;
+
+        // draw image MCU block only if it will fit on the screen
+        if ( (mcu_x + win_w) <= tft.width() && (mcu_y + win_h) <= tft.height() ){
+
+          // Now set a MCU bounding window on the TFT to push pixels into 
+          // (x, y, x + width - 1, y + height - 1)
+
+          tft.setAddrWindow(mcu_x, mcu_y, mcu_x + win_w - 1, mcu_y + win_h - 1);
+
+          // Write all MCU pixels to the TFT window
+          //while (mcu_pixels--) tft.pushColor(*pImg++); // Send MCU buffer to TFT 16 bits at a time
+          tft.pushColors(block, mcu_pixels, 1);
+        }
+
+
+
+
+      } else {
+        //we are in the header flag, read some information
+        mcu_w = read16();
+        mcu_h = read16();
+        max_x = read16();
+        max_y = read16();
+        for(short i = 0; i < 3; i++){
+          if(Serial.read() != '-'){
+            error = true;
+            break;
+          }
+        }
+        if(error){
+          break;          
+        }
+        headerFlag = false;
+      }
+    }
+
+  }
+
+}
+void setup(){
+
+  Serial.begin(SERIAL_BAUD);
+  
+}
+void loop(){
+  
+}
+#endif
