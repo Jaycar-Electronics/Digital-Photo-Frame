@@ -3,7 +3,22 @@
 #define SERIAL_BAUD 115200
 
 //#define DEBUG
-
+/* ===========================
+ * SUPER NOTE:
+ * ===========================
+ *  if you are finding compiling problems
+ *  ie things about expecting '}' at end of input
+ *  
+ *  downgrade to esp 2.5.2 to compile - it will compile fine.
+ *  
+ *  complain here: https://github.com/esp8266/Arduino/issues/5784
+ *  
+ *  TLDR: who knows. ESP seems to be touchy. 
+ *  if you have a fix / patch for the latest 
+ *  version definitely let us know.
+ * 
+ * 
+ */
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
